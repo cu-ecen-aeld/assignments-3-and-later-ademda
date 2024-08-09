@@ -5,7 +5,7 @@ OBJ2 :=aesdsocketdata
 
 LDFLAGS += -Wl,--hash-style=gnu
 
-CC ?= $(CROSS_COMPILE)gcc
+CC := $(TARGET_CC)
 
 
 all:
