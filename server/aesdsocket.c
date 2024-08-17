@@ -459,22 +459,22 @@ void * threadHandler(void * alist)
             if(0 == strncmp(buffer, "AESDCHAR_IOCSEEKTO:", 19))
             {
                 DBGLOG("Found a command:"); 
-                if(2 == sscanf(buffer, "AESDCHAR_IOCSEEKTO:%d,%d", 
+                /*if(2 == sscanf(buffer, "AESDCHAR_IOCSEEKTO:%d,%d", 
                  //   &(seekTo.write_cmd), &(seekTo.write_cmd_offset)))
                 {
                     DBGLOG("Found a command:");     
                        // buffer,seekTo.write_cmd,seekTo.write_cmd_offset);
 
-                    if(-1 != fOutputFD)
+                    /*if(-1 != fOutputFD)
                     {
                         //ioctl(fOutputFD, AESDCHAR_IOCSEEKTO, (unsigned long)&seekTo); 
                         ifRewind = false;
-                        break;
-                    }
-                }
+                        break;*/
+                    //}
+                //}
             }
 
-            int iRet = fwrite(buffer, 1 , iReceived, fOutput);
+           /* int iRet = fwrite(buffer, 1 , iReceived, fOutput);
             DBGLOG("Found a command:");  
                     iRet, iReceived, (int) buffer[iReceived - 1]);
 
@@ -483,8 +483,8 @@ void * threadHandler(void * alist)
             {
                 t = time(NULL);
                 DBGLOG("Found a command:"); 
-                break;
-            }
+                break;*/
+            
         }
 
     } while(((errno == EAGAIN || errno == EWOULDBLOCK) && iReceived <0) || (iReceived > 0));
