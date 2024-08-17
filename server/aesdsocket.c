@@ -458,11 +458,11 @@ void * threadHandler(void * alist)
            // struct aesd_seekto seekTo; 
             if(0 == strncmp(buffer, "AESDCHAR_IOCSEEKTO:", 19))
             {
-                DBGLOG("Found a command:%s. \n", buffer);
+                DBGLOG("Found a command:"); 
                 if(2 == sscanf(buffer, "AESDCHAR_IOCSEEKTO:%d,%d", 
                  //   &(seekTo.write_cmd), &(seekTo.write_cmd_offset)))
                 {
-                    DBGLOG("Found a command:%s, %d,%d. \n",     
+                    DBGLOG("Found a command:");     
                        // buffer,seekTo.write_cmd,seekTo.write_cmd_offset);
 
                     if(-1 != fOutputFD)
@@ -475,15 +475,14 @@ void * threadHandler(void * alist)
             }
 
             int iRet = fwrite(buffer, 1 , iReceived, fOutput);
-            DBGLOG("Data saved: %d vs received: %d, %d. \n", 
+            DBGLOG("Found a command:");  
                     iRet, iReceived, (int) buffer[iReceived - 1]);
 
             // quit receving when a full packet is received.
             if('\n' == buffer[iReceived - 1]) 
             {
                 t = time(NULL);
-                DBGLOG("Full package: %d vs received: %d, %s. \n", 
-                    iRet, iReceived, ctime(&t));
+                DBGLOG("Found a command:"); 
                 break;
             }
         }
