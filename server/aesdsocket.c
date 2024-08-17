@@ -460,10 +460,10 @@ void * threadHandler(void * alist)
             {
                 DBGLOG("Found a command:%s. \n", buffer);
                 if(2 == sscanf(buffer, "AESDCHAR_IOCSEEKTO:%d,%d", 
-                    &(seekTo.write_cmd), &(seekTo.write_cmd_offset)))
+                 //   &(seekTo.write_cmd), &(seekTo.write_cmd_offset)))
                 {
                     DBGLOG("Found a command:%s, %d,%d. \n",     
-                        buffer,seekTo.write_cmd,seekTo.write_cmd_offset);
+                       // buffer,seekTo.write_cmd,seekTo.write_cmd_offset);
 
                     if(-1 != fOutputFD)
                     {
