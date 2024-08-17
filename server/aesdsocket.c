@@ -455,7 +455,7 @@ void * threadHandler(void * alist)
         if(0 < iReceived)
         {
       
-            struct aesd_seekto seekTo; 
+           // struct aesd_seekto seekTo; 
             if(0 == strncmp(buffer, "AESDCHAR_IOCSEEKTO:", 19))
             {
                 DBGLOG("Found a command:%s. \n", buffer);
