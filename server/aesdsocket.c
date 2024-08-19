@@ -1,3 +1,25 @@
+/****************************************************************************
+ *  Author:     Daniel Mendez
+ *  Course:     ECEN 5823
+ *  Project:    Assignment_9
+ *
+ ****************************************************************************/
+
+/**
+ * @file        aesdsocket.c
+ * @brief       Source file for socker server
+ *
+ * @details     This file contains the function to initialize the LETIMER0 module
+ *              with the following settings:
+ *
+ * @sources     - Beej Guide to Network Programming :https://beej.us/guide/bgnet/html/ Leveraged code from 6.1 A simple Stream Server with modifications
+ *              - Linux System Programming : Chapter 10 Signals Page 342
+ *
+
+ *
+ * @date        1 Nov 2023
+ * @version     2.0
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -14,7 +36,9 @@
 #include <stdbool.h>
 #include <time.h>
 #include <pthread.h>
+#include <regex.h>
 #include "queue.h"
+#include "aesd_ioctl.h"
 
 
 #define USE_AESD_CHAR_DEVICE 1
@@ -24,9 +48,9 @@
 #define BACKLOG 10   // how many pending connections queue will hold
 
 #if USE_AESD_CHAR_DEVICE
-	#define OUTPUT_FILE "/dev/aesdchar"
+#define OUTPUT_FILE "/dev/aesdchar"
 #else
-	#define OUTPUT_FILE "/var/tmp/aesdsocketdata"
+#define OUTPUT_FILE "/var/tmp/aesdsocketdata"
 #endif
 
 #define ERROR_RESULT (-1)
@@ -53,7 +77,7 @@ SLIST_HEAD(threadList, thread_node) threadListHead = SLIST_HEAD_INITIALIZER(thre
 
 static void signal_handler(int signo) {
     //Free the linked list
-	syslog(LOG_DEBUG, "Caught signal in sign handler %d" ,signo);	
+    syslog(LOG_DEBUG, "Caught signal in sign handler %d", signo);
     thread_node_t *currentElement, *tempElement;
     SLIST_FOREACH_SAFE(currentElement, &threadListHead, entries, tempElement) {
         //Remove the output file
@@ -62,10 +86,10 @@ static void signal_handler(int signo) {
         if (remove(temp_file) == 0) {
             printf("File '%s' deleted successfully.\n", temp_file);
         }
-		syslog(LOG_DEBUG, "cleaned up files in handler");	
+        syslog(LOG_DEBUG, "cleaned up files in handler");
         //Join all running threads
         //IDK if this should be pthread_cancel or pthread_join
-        pthread_join(currentElement->thread_id,NULL);
+        pthread_join(currentElement->thread_id, NULL);
         // Remove the element safely from the list.
         SLIST_REMOVE(&threadListHead, currentElement, thread_node, entries);
         //Free the thread param data
@@ -121,6 +145,57 @@ void *get_in_addr(struct sockaddr *sa) {
     return &(((struct sockaddr_in6 *) sa)->sin6_addr);
 }
 
+bool check_for_ioctl_cmd(char *temp_file, uint32_t *cmd_num, uint32_t *cmd_offset) {
+    char pattern[] = "(AESDCHAR_IOCSEEKTO:)([0-9]+),([0-9]+)";
+    char cmd_num_str[100];
+    char cmd_offset_str[100];
+    regex_t regex;
+    regmatch_t matches[4];
+    bool result;
+
+    // Compile the regular expression
+    int reti = regcomp(&regex, pattern, REG_EXTENDED);
+    if (reti) {
+        fprintf(stderr, "Regex compilation failed\n");
+        exit(EXIT_FAILURE);
+    }
+
+    //Since the fd is open we simply read the file into memory;
+    char temp_buffer[BUFFER_SIZE];
+    int temp_fd = open(temp_file, O_CREAT | O_RDWR, 0666);
+    //Read in the entire file as much as the buffer can hold
+    size_t num_bytes = read(temp_fd, temp_buffer, BUFFER_SIZE);
+    //Insert a null char
+    temp_buffer[num_bytes] = '\0';
+    //Execute the regex
+    int match_result = regexec(&regex, temp_buffer, 4, matches, 0);
+
+    if (match_result != 0) {
+        result = false;
+    } else {
+        //We have a match in the template so extract the numbers
+        int start1 = matches[2].rm_so;
+        int end1 = matches[2].rm_eo;
+        strncpy(cmd_num_str, temp_buffer + start1, end1 - start1);
+        cmd_num_str[end1 - start1] = '\0';
+
+        int start2 = matches[3].rm_so;
+        int end2 = matches[3].rm_eo;
+        strncpy(cmd_offset_str, temp_buffer + start2, end2 - start2);
+        cmd_offset_str[end2 - start2] = '\0';
+
+        // Convert the captured number strings to uint32_t
+        *cmd_num = (uint32_t) strtoul(cmd_num_str, NULL, 10);
+        *cmd_offset = (uint32_t) strtoul(cmd_offset_str, NULL, 10);
+
+        result = true;
+    }
+
+    //Close the fd
+    close(temp_fd);
+    return result;
+}
+
 
 void daemonize() {
     // Fork off the parent process
@@ -174,12 +249,14 @@ void *thread_function(void *thread_param) {
     int client_socket = threadData->client_socket;
     ssize_t bytes_received;
     char recv_buffer[BUFFER_SIZE];
-
+    ssize_t bytesRead;
     //Setup the temp file name
     char temp_file[256];
+    //Temp buffer for copying over data
+    char temp_file_buffer[BUFFER_SIZE];
     snprintf(temp_file, sizeof(temp_file), "/var/tmp/tempfile_%d.txt", threadData->thread_num);
     printf("Thread %d waiting on data!  \r\n", threadData->thread_num);
-
+    int log_fd;
     //Waits for data
     while (1) {
         bytes_received = recv(client_socket, recv_buffer, BUFFER_SIZE, 0);
@@ -196,7 +273,6 @@ void *thread_function(void *thread_param) {
         }
         //Iterate through the bytes received and add them to the recv_buffer to write to the file
         for (int i = 0; i < bytes_received; i++) {
-            //Open the temporary file, creating it if needed
 
             char new_char = recv_buffer[i];
             //If new_char is not a newline then just add it in to the temp file
@@ -211,55 +287,93 @@ void *thread_function(void *thread_param) {
                 //Then close the fd
                 close(temp_fd);
             } else {
-                //Open it in Read and Writing mode
-                int temp_fd = open(temp_file, O_CREAT|O_RDWR,0666);
-                //Check temp file return code
-                if (temp_fd == -1) {
-                    perror("Error opening temporary file for copying");
-                    exit(EXIT_FAILURE);
+
+                struct aesd_seekto seek_params;
+                //We check the current temp file to see if the string matches our command
+                bool ioctl_called = check_for_ioctl_cmd(temp_file, &(seek_params.write_cmd),
+                                                        &(seek_params.write_cmd_offset));
+                if (ioctl_called) {
+
+                    int temp_fd = open(temp_file, O_CREAT | O_RDWR, 0666);
+                    //We just empty the log file and continue since we don't write
+                    if (ftruncate(temp_fd, 0) == -1) {
+                        perror("Error truncating file");
+                        close(temp_fd); // Close the file descriptor
+                    }
+                    //Now we perform the ioctl cmd
+                    printf("Performing ioctl_cmd with cmd_offsed %d and write_cmd_offset of %d \r\n",
+                           seek_params.write_cmd, seek_params.write_cmd_offset);
+                    //Do the ioctly seek
+
+                    // Open the device or driver (replace with the appropriate file path)
+                    log_fd = open(OUTPUT_FILE, O_RDWR);
+                    if (log_fd == -1) {
+                        perror("Failed to open device");
+                        continue;
+                    }
+
+                    if (ioctl(log_fd, AESDCHAR_IOCSEEKTO, &seek_params) == -1) {
+                        perror("IOCTL operation failed");
+                    }
+                    //Close temp file descriptor
+                    //close(ioctl_fd);
+                    close(temp_fd);
+
+
                 }
-                //Init Temp buffer for copying over data
-                char temp_file_buffer[BUFFER_SIZE];
+                    //Only append to log file if ioctl command not called
+                else {
+                    //Open it in Read and Writing mode
+                    int temp_fd = open(temp_file, O_CREAT | O_RDWR, 0666);
+                    //Check temp file return code
+                    if (temp_fd == -1) {
+                        perror("Error opening temporary file for copying");
+                        exit(EXIT_FAILURE);
+                    }
 
-                ssize_t bytesRead;
-                //Else we close off this packet by dumping to our main file
-                //Here we first lock the mutex
 
-                pthread_mutex_lock(threadData->log_file_mutex);
-                //Then we open the main file creating it if it doesn't exist
-                int log_fd = open(OUTPUT_FILE, O_WRONLY | O_CREAT | O_APPEND, 0666);
-                //Keep copying over from temp file to main file
-                while ((bytesRead = read(temp_fd, temp_file_buffer, BUFFER_SIZE)) > 0) {
-                    if (write(log_fd, temp_file_buffer, bytesRead) == -1) {
-                        perror("Error writing to destination file");
+
+                    //Else we close off this packet by dumping to our main file
+                    //Here we first lock the mutex
+
+                    pthread_mutex_lock(threadData->log_file_mutex);
+                    //Then we open the main file creating it if it doesn't exist
+                    log_fd = open(OUTPUT_FILE, O_WRONLY | O_CREAT | O_APPEND, 0666);
+                    //Keep copying over from temp file to main file
+                    while ((bytesRead = read(temp_fd, temp_file_buffer, BUFFER_SIZE)) > 0) {
+                        if (write(log_fd, temp_file_buffer, bytesRead) == -1) {
+                            perror("Error writing to destination file");
+                            close(temp_fd);
+                            close(log_fd);
+                            exit(EXIT_FAILURE);
+                        }
+                    }
+                    //THen just write the \n and \0 to terminate
+                    char *line_terminator = "\n";
+                    if (write(log_fd, line_terminator, 1) == -1) {
+                        perror("Error writing line terminator");
                         close(temp_fd);
                         close(log_fd);
                         exit(EXIT_FAILURE);
                     }
-                }
-                //THen just write the \n and \0 to terminate
-                char *line_terminator = "\n";
-                if (write(log_fd, line_terminator, 1) == -1) {
-                    perror("Error writing line terminator");
+
+
+                    //Then just empty the temporary file
+                    if (ftruncate(temp_fd, 0) == -1) {
+                        perror("Error truncating file");
+                        close(temp_fd); // Close the file descriptor on error
+                        exit(EXIT_FAILURE);
+                    }
+                    //No need for the temp file now so close the fd
                     close(temp_fd);
+                    //Now we have to read the entire log file and print the output to the user
+                    //Close the current reading mode
                     close(log_fd);
-                    exit(EXIT_FAILURE);
+                    //Open it for reading only
+                    log_fd = open(OUTPUT_FILE, O_RDONLY);
+
                 }
 
-
-                //Then just empty the temporary file
-                if (ftruncate(temp_fd, 0) == -1) {
-                    perror("Error truncating file");
-                    close(temp_fd); // Close the file descriptor on error
-                    exit(EXIT_FAILURE);
-                }
-                //No need for the temp file now so close the fd
-                close(temp_fd);
-                //Now we have to read the entire log file and print the output to the user
-                //Close the current reading mode
-                close(log_fd);
-                //Open it for reading only
-                log_fd = open(OUTPUT_FILE, O_RDONLY);
                 //Keep reading  from log file and return over the socket
                 while ((bytesRead = read(log_fd, temp_file_buffer, BUFFER_SIZE)) > 0) {
                     //We return the read bytes to the user over the socket
@@ -319,12 +433,12 @@ int main(int argc, char *argv[]) {
         return ERROR_RESULT;
     }
 
-	#if !USE_AESD_CHAR_DEVICE
+#if !USE_AESD_CHAR_DEVICE
     //Remove the output file
     if (remove(OUTPUT_FILE) == 0) {
         printf("File '%s' deleted successfully.\n", OUTPUT_FILE);
     }
-	#endif
+#endif
 
 
 
@@ -396,9 +510,9 @@ int main(int argc, char *argv[]) {
     printf("Currently listening for connections!\n");
 
     //Setup an alarm
-	#if !USE_AESD_CHAR_DEVICE
-		alarm(10);
-	#endif
+#if !USE_AESD_CHAR_DEVICE
+    alarm(10);
+#endif
 
     //Waits for connections
     while (1) {  // main accept() loop
@@ -455,7 +569,8 @@ int main(int argc, char *argv[]) {
                 printf("Cleanup of thread/node %d occuring \r\n", currentElement->thread_params->thread_num);
                 //Remove the output file
                 char temp_file[256];
-                snprintf(temp_file, sizeof(temp_file), "/var/tmp/tempfile_%d.txt", currentElement->thread_params->thread_num);
+                snprintf(temp_file, sizeof(temp_file), "/var/tmp/tempfile_%d.txt",
+                         currentElement->thread_params->thread_num);
                 if (remove(temp_file) == 0) {
                     printf("File '%s' deleted successfully.\n", temp_file);
                 }
